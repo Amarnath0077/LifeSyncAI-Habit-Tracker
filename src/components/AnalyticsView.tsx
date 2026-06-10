@@ -317,36 +317,7 @@ const handleTriggerEmailCampaign = async (
 };
         
         // Write generated logs & notifications client-side with full user credentials context
-        const activeUid = auth.currentUser?.uid || userId;
-        if (data.logPayload) {
-          try {
-            await setDoc(doc(db, "users", activeUid, "email_logs", data.logPayload.id), data.logPayload);
-          } catch (logErr) {
-            try {
-              handleFirestoreError(logErr, OperationType.CREATE, `users/${activeUid}/email_logs/${data.logPayload.id}`);
-            } catch (ignored) {}
-            console.error("Client failed to log email delivery to Firestore:", logErr);
-          }
-        }
-        if (data.notifPayload) {
-          try {
-            await setDoc(doc(db, "users", activeUid, "notifications", data.notifPayload.id), data.notifPayload);
-          } catch (notifErr) {
-            try {
-              handleFirestoreError(notifErr, OperationType.CREATE, `users/${activeUid}/notifications/${data.notifPayload.id}`);
-            } catch (ignored) {}
-            console.error("Client failed to store notification to Firestore:", notifErr);
-          }
-        }
-
-        fetchEmailLogs();
-      } else {
-        setTestMessage({ success: false, text: `Failed to dispatch ${campaign}: ${data.error}` });
-      }
-    } catch (err: any) {
-      setTestMessage({ success: false, text: `Manual release fault: ${err.message}` });
-    }
-  };
+     
 
   useEffect(() => {
     fetchCoachInsights();
