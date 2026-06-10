@@ -254,10 +254,10 @@ export default function AnalyticsView({
         eveningTime: eveningT,
         eodTime: eodT
       });
-      setSaveStatus({ success: true, text: "Notification settings and credentials saved successfully to Cloud DB!" });
+      setSaveStatus({ success: true, text: "Notification preferences and schedule saved successfully!" });
       setTimeout(() => setSaveStatus(null), 4000);
     } catch (err: any) {
-      setSaveStatus({ success: false, text: "Failed to persist credentials: " + err.message });
+      setSaveStatus({ success: false, text: "Failed to persist preferences: " + err.message });
     } finally {
       setIsSaving(false);
     }
@@ -1086,124 +1086,11 @@ export default function AnalyticsView({
                   </div>
                 </div>
 
-                {/* 3. Provider Selector & Credentials Form */}
-                <div className="p-4 bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-slate-150 dark:border-slate-850 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <span className="text-[9px] uppercase font-black tracking-widest text-indigo-500 block">3. Email delivery Gateway</span>
-                    <select
-                      value={provider}
-                      onChange={(e) => setProvider(e.target.value as any)}
-                      className="text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-1.5 focus:outline-none"
-                    >
-                      <option value="sandbox">Sandbox (Simulated Mail Server)</option>
-                      <option value="resend">Resend API Portal Key</option>
-                      <option value="sendgrid">SendGrid API Key Gateway</option>
-                      <option value="smtp">Custom SMTP Relay Network</option>
-                      <option value="gmail">Gmail Secure SMTP Protocol</option>
-                    </select>
-                  </div>
 
-                  {/* Provider Specific Inputs */}
-                  {provider === "sandbox" && (
-                    <div className="p-3.5 rounded-xl bg-orange-500/5 border border-orange-500/10 text-[11px] leading-relaxed text-orange-600/90 dark:text-orange-400">
-                      <span className="font-extrabold block mb-0.5">🎮 Sandbox Simulation Active</span>
-                      No real emails will be delivered. Delivery logs are drafted instantly with visual previews of HTML payloads in the audit trace table, bypassing SMTP keys limits.
-                    </div>
-                  )}
-
-                  {(provider === "resend" || provider === "sendgrid") && (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-[10px] uppercase font-bold text-slate-404 mb-1">
-                          {provider === "resend" ? "Resend API Key" : "SendGrid Secret API Key"}
-                        </label>
-                        <input 
-                          type="password"
-                          value={apiKey}
-                          onChange={(e) => setApiKey(e.target.value)}
-                          placeholder={provider === "resend" ? "re_xxx..." : "SG.xxx..."}
-                          className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono"
-                        />
-                        <span className="text-[9px] text-slate-400 mt-1 block">Declare variable as RESEND_API_KEY or SENDGRID_API_KEY in .env.example if preferred.</span>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] uppercase font-bold text-slate-404 mb-1">Sender "From" Email address</label>
-                        <input 
-                          type="email"
-                          value={from}
-                          onChange={(e) => setFrom(e.target.value)}
-                          placeholder="noreply@yourdomain.com"
-                          className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {(provider === "smtp" || provider === "gmail") && (
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="sm:col-span-2">
-                          <label className="block text-[10px] uppercase font-bold text-slate-404 mb-1">SMTP Outgoing Host</label>
-                          <input 
-                            type="text"
-                            value={host}
-                            onChange={(e) => setHost(e.target.value)}
-                            placeholder={provider === "gmail" ? "smtp.gmail.com" : "mail.smtp2go.com"}
-                            className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-semibold"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] uppercase font-bold text-slate-404 mb-1">SMTP Port</label>
-                          <input 
-                            type="number"
-                            value={port}
-                            onChange={(e) => setPort(Number(e.target.value))}
-                            placeholder="587"
-                            className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-semibold"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-[10px] uppercase font-bold text-slate-404 mb-1">SMTP User Credentials</label>
-                          <input 
-                            type="text"
-                            value={user}
-                            onChange={(e) => setUser(e.target.value)}
-                            placeholder="user@example.com"
-                            className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] uppercase font-bold text-slate-404 mb-1">SMTP Passkey / App Password</label>
-                          <input 
-                            type="password"
-                            value={pass}
-                            onChange={(e) => setPass(e.target.value)}
-                            placeholder="••••••••••••••••"
-                            className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] uppercase font-bold text-slate-404 mb-1">Sender "From" Email address</label>
-                        <input 
-                          type="email"
-                          value={from}
-                          onChange={(e) => setFrom(e.target.value)}
-                          placeholder={provider === "gmail" ? "your-gmail@gmail.com" : "sender@authenticated.com"}
-                          className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
 
                 {/* Save Credentials Action */}
                 <div className="flex justify-between items-center pt-1">
-                  <span className="text-[10px] text-slate-400 font-medium">Auto-saves schedule, API keys remain masked.</span>
+                  <span className="text-[10px] text-slate-400 font-medium">Saves updated scheduling and toggle preferences.</span>
                   <button
                     onClick={handleSaveEmailConfig}
                     disabled={isSaving}
