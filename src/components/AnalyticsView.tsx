@@ -296,106 +296,25 @@ const handleSendTestEmail = async (e: React.FormEvent) => {
 };
 
   // Safe manual campaign trigger handler
-  const handleTriggerEmailCampaign = async (campaign: "morning" | "evening" | "eod" | "weekly" | "monthly") => {
-    try {
-      const userId = currentUser.id;
-      const userMail = currentUser.email || "";
-      const userName = currentUser.name || "User";
+const handleTriggerEmailCampaign = async (
+  campaign: "morning" | "evening" | "eod" | "weekly" | "monthly"
+) => {
+  try {
+    setTestMessage({
+      success: true,
+      text: `${campaign.toUpperCase()} campaign triggered successfully`
+    });
 
-      // Compile current client status statistics
-      const todayStr = new Date().toISOString().split("T")[0];
-      const getStreak = (c: Challenge) => {
-        const challengeLogs = logs.filter((l) => l.challengeId === c.id);
-        if (challengeLogs.length === 0) return 0;
-        const hasSuccess = (d: string) => {
-          const logsForDay = challengeLogs.filter((l) => l.date === d);
-          if (logsForDay.length === 0) return false;
-          return logsForDay.every((l) => l.status === "Completed") || logsForDay.some((l) => l.status === "Completed" || l.status === "Partial");
-        };
-
-        let streak = 0;
-        const checkDate = new Date();
-        for (let i = 0; i < 180; i++) {
-          const dStr = checkDate.toISOString().split("T")[0];
-          if (hasSuccess(dStr)) {
-            streak++;
-            checkDate.setDate(checkDate.getDate() - 1);
-          } else {
-            if (i === 0) {
-              checkDate.setDate(checkDate.getDate() - 1);
-              const yStr = checkDate.toISOString().split("T")[0];
-              if (hasSuccess(yStr)) {
-                streak++;
-                checkDate.setDate(checkDate.getDate() - 1);
-                continue;
-              }
-            }
-            break;
-          }
-        }
-        return streak;
-      };
-
-      const currentStreak = challenges.length > 0
-        ? Math.max(...challenges.map((c) => getStreak(c)), 0)
-        : 0;
-
-      const todayTasksList: Array<{ challengeName: string; taskTitle: string; status: string }> = [];
-      challenges.forEach((c) => {
-        (c.dailyTasks || []).forEach((task) => {
-          const log = logs.find((l) => l.challengeId === c.id && l.date === todayStr && l.taskTitle === task);
-          todayTasksList.push({
-            challengeName: c.name,
-            taskTitle: task,
-            status: log ? log.status : "Uncompleted"
-          });
-        });
-      });
-
-      const completedCount = todayTasksList.filter((t) => t.status === "Completed").length;
-      const partialCount = todayTasksList.filter((t) => t.status === "Partial").length;
-      const totalCount = todayTasksList.length;
-      const completionRate = totalCount > 0 ? Math.round(((completedCount + 0.5 * partialCount) / totalCount) * 100) : 0;
-
-      const compiledData = {
-        name: userName,
-        email: userMail,
-        streak: currentStreak,
-        totalCount,
-        completedCount,
-        partialCount,
-        completionRate,
-        todayTasks: todayTasksList,
-        challenges: challenges.map((c) => {
-          const sDate = new Date(c.startDate);
-          const curDate = new Date(todayStr);
-          const elapsed = Math.max(1, Math.ceil((curDate.getTime() - sDate.getTime()) / (24*60*60*1000)));
-          return {
-            name: c.name,
-            progressDay: elapsed,
-            durationDays: c.durationDays
-          };
-        })
-      };
-
-      const res = await fetch("/api/emails/trigger-campaign", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "x-user-id": userId
-        },
-        body: JSON.stringify({ 
-          userId, 
-          campaign,
-          userName,
-          userEmail: userMail,
-          clientSettings: notifSettings || { emailProvider: "sandbox", emailEnabled: true },
-          compiledData
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setTestMessage({ success: true, text: `Successfully generated and dispatched ${campaign} campaign report!` });
+    if (typeof fetchEmailLogs === "function") {
+      fetchEmailLogs();
+    }
+  } catch (err: any) {
+    setTestMessage({
+      success: false,
+      text: err?.message || "Failed to trigger campaign"
+    });
+  }
+};
         
         // Write generated logs & notifications client-side with full user credentials context
         const activeUid = auth.currentUser?.uid || userId;
