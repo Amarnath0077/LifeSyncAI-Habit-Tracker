@@ -1,10 +1,10 @@
 {
-  "projectId": "intricate-coda-1sjh2",
-  "appId": "1:1038549241541:web:9d2d8464b1052c5700aaac",
-  "apiKey": "AIzaSyDj2J6XU7ETgHCiuyo8BpxQzXzZtwKFvoY",
-  "authDomain": "intricate-coda-1sjh2.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-2799e93b-c542-4ea0-8da6-abfea71c473a",
-  "storageBucket": "intricate-coda-1sjh2.firebasestorage.app",
-  "messagingSenderId": "1038549241541",
+  "projectId": "YOUR_PROJECT_ID",
+  "appId": "YOUR_APP_ID",
+  "apiKey": "YOUR_API_KEY",
+  "authDomain": "YOUR_AUTH_DOMAIN",
+  "firestoreDatabaseId": "YOUR_DB_ID",
+  "storageBucket": "YOUR_STORAGE_BUCKET",
+  "messagingSenderId": "YOUR_SENDER_ID",
   "measurementId": ""
 }
