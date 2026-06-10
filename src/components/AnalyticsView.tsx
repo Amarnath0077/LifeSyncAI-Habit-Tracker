@@ -253,16 +253,31 @@ const handleSendTestEmail = async (e: React.FormEvent) => {
   setTestMessage(null);
 
   try {
+    const res = await fetch("/api/emails/send-test", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-user-id": currentUser.id
+      },
+      body: JSON.stringify({
+        recipient: testEmailTo,
+        emailProvider: "gmail"
+      })
+    });
+
+    const data = await res.json();
+
     setTestMessage({
-      success: true,
-      text: `Verification email simulation sent to ${testEmailTo}`
+      success: data.success,
+      text: data.message || data.error
     });
 
     fetchEmailLogs?.();
+
   } catch (err: any) {
     setTestMessage({
       success: false,
-      text: err?.message || "Failed to send verification"
+      text: err.message
     });
   } finally {
     setTestSending(false);
