@@ -238,76 +238,62 @@ export default function AnalyticsView({
   }, []);
 
   // Save the full Email & Schedule setup to backend database
-  const handleSaveEmailConfig = async () => {
-    setIsSaving(true);
-    setSaveStatus(null);
-    try {
-      await onUpdateNotifSettings({
-        emailProvider: provider,
-        emailApiKey: apiKey,
-        smtpHost: host,
-        smtpPort: Number(port),
-        smtpUser: user,
-        smtpPass: pass,
-        smtpFrom: from,
-        morningTime: morningT,
-        eveningTime: eveningT,
-        eodTime: eodT
-      });
-      setSaveStatus({ success: true, text: "Notification preferences and schedule saved successfully!" });
-      setTimeout(() => setSaveStatus(null), 4000);
-    } catch (err: any) {
-      setSaveStatus({ success: false, text: "Failed to persist preferences: " + err.message });
-    } finally {
-      setIsSaving(false);
-    }
-  };
+const handleSendTestEmail = async (e: React.FormEvent) => {
+  e.preventDefault();
 
-  // Perform safe connection testing
-  const handleSendTestEmail = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!testEmailTo) {
-      setTestMessage({ success: false, text: "Please enter a recipient email address." });
-      return;
-    }
-    setTestSending(true);
-    setTestMessage(null);
-    try {
-      const userId = currentUser.id;
-      
-      const configPayload = {
-        userId,
-        recipient: testEmailTo,
-        provider,
-        apiKey,
-        smtpHost: host,
-        smtpPort: Number(port),
-        smtpUser: user,
-        smtpPass: pass,
-        smtpFrom: from
-      };
+  if (!testEmailTo) {
+    setTestMessage({
+      success: false,
+      text: "Please enter a recipient email address."
+    });
+    return;
+  }
 
-      const res = await fetch("/api/emails/send-test", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "x-user-id": userId
-        },
-        body: JSON.stringify(configPayload)
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setTestMessage({ success: true, text: `Successfully sent test to ${testEmailTo}! Service logged as success.` });
-        fetchEmailLogs();
-      } else {
-        setTestMessage({ success: false, text: `Test failed: ${data.error || "Unknown server error"}` });
-      }
-    } catch (err: any) {
-      setTestMessage({ success: false, text: `Network error: ${err.message}` });
-    } finally {
-      setTestSending(false);
+  setTestSending(true);
+  setTestMessage(null);
+
+  try {
+    const res = await fetch("/api/emails/send-test", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        recipient: testEmailTo
+      })
+    });
+
+    const text = await res.text();
+
+    let data: any = {};
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(
+        "API route not found. Create /api/emails/send-test first."
+      );
     }
-  };
+
+    if (res.ok) {
+      setTestMessage({
+        success: true,
+        text: "Test email sent successfully."
+      });
+    } else {
+      setTestMessage({
+        success: false,
+        text: data.error || "Failed to send email."
+      });
+    }
+  } catch (err: any) {
+    setTestMessage({
+      success: false,
+      text: err.message
+    });
+  } finally {
+    setTestSending(false);
+  }
+};
 
   // Safe manual campaign trigger handler
   const handleTriggerEmailCampaign = async (campaign: "morning" | "evening" | "eod" | "weekly" | "monthly") => {
