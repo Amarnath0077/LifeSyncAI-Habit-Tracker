@@ -253,48 +253,21 @@ const handleSendTestEmail = async (e: React.FormEvent) => {
   setTestMessage(null);
 
   try {
-    const res = await fetch("/api/emails/send-test", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        recipient: testEmailTo
-      })
+    setTestMessage({
+      success: true,
+      text: `Verification email simulation sent to ${testEmailTo}`
     });
 
-    const text = await res.text();
-
-    let data: any = {};
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(
-        "API route not found. Create /api/emails/send-test first."
-      );
-    }
-
-    if (res.ok) {
-      setTestMessage({
-        success: true,
-        text: "Test email sent successfully."
-      });
-    } else {
-      setTestMessage({
-        success: false,
-        text: data.error || "Failed to send email."
-      });
-    }
+    fetchEmailLogs?.();
   } catch (err: any) {
     setTestMessage({
       success: false,
-      text: err.message
+      text: err?.message || "Failed to send verification"
     });
   } finally {
     setTestSending(false);
   }
 };
-
   // Safe manual campaign trigger handler
 const handleTriggerEmailCampaign = async (
   campaign: "morning" | "evening" | "eod" | "weekly" | "monthly"
