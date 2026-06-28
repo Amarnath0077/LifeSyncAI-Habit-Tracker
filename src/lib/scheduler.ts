@@ -79,34 +79,62 @@ export function initializeEmailSchedulers(
       // Compile user statistic indices from modern Firestore collections directly inside client
       const compileSchedulerUserData = async () => {
         try {
-          let userSnap;
-          try {
-            userSnap = await getDoc(doc(db, "users", activeUid));
-          } catch (e) {
-            handleFirestoreError(e, OperationType.GET, `users/${activeUid}`);
-            throw e;
-          }
-          const userData = userSnap.exists() ? userSnap.data() : null;
-          const emailVal = userData?.email || "";
-          const nameVal = userData?.name || "Participant";
+          let nameVal = "Demo Guest";
+          let emailVal = "demo@lifesync.ai";
+          let userChallenges: any[] = [];
+          let userLogs: any[] = [];
 
-          let challengesSnap;
-          try {
-            challengesSnap = await getDocs(collection(db, "users", activeUid, "challenges"));
-          } catch (e) {
-            handleFirestoreError(e, OperationType.LIST, `users/${activeUid}/challenges`);
-            throw e;
-          }
-          const userChallenges = challengesSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+          if (activeUid === "demo-local-user") {
+            const localUserRaw = localStorage.getItem("demo-local-user");
+            if (localUserRaw) {
+              try {
+                const u = JSON.parse(localUserRaw);
+                nameVal = u.name || nameVal;
+                emailVal = u.email || emailVal;
+              } catch (_) {}
+            }
+            const challengesRaw = localStorage.getItem(`local_challenges_${activeUid}`);
+            if (challengesRaw) {
+              try {
+                userChallenges = JSON.parse(challengesRaw);
+              } catch (_) {}
+            }
+            const logsRaw = localStorage.getItem(`local_tasks_${activeUid}`);
+            if (logsRaw) {
+              try {
+                userLogs = JSON.parse(logsRaw);
+              } catch (_) {}
+            }
+          } else {
+            let userSnap;
+            try {
+              userSnap = await getDoc(doc(db, "users", activeUid));
+            } catch (e) {
+              handleFirestoreError(e, OperationType.GET, `users/${activeUid}`);
+              throw e;
+            }
+            const userData = userSnap.exists() ? userSnap.data() : null;
+            emailVal = userData?.email || "";
+            nameVal = userData?.name || "Participant";
 
-          let tasksSnap;
-          try {
-            tasksSnap = await getDocs(collection(db, "users", activeUid, "tasks"));
-          } catch (e) {
-            handleFirestoreError(e, OperationType.LIST, `users/${activeUid}/tasks`);
-            throw e;
+            let challengesSnap;
+            try {
+              challengesSnap = await getDocs(collection(db, "users", activeUid, "challenges"));
+            } catch (e) {
+              handleFirestoreError(e, OperationType.LIST, `users/${activeUid}/challenges`);
+              throw e;
+            }
+            userChallenges = challengesSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+
+            let tasksSnap;
+            try {
+              tasksSnap = await getDocs(collection(db, "users", activeUid, "tasks"));
+            } catch (e) {
+              handleFirestoreError(e, OperationType.LIST, `users/${activeUid}/tasks`);
+              throw e;
+            }
+            userLogs = tasksSnap.docs.map(d => ({ ...d.data(), id: d.id }));
           }
-          const userLogs = tasksSnap.docs.map(d => ({ ...d.data(), id: d.id }));
 
           const getStreak = (c: any) => {
             const challengeLogs = userLogs.filter((l: any) => l.challengeId === c.id);
@@ -229,13 +257,22 @@ export function initializeEmailSchedulers(
             }),
           });
 
-          const data = await res.json();
-          if (res.ok) {
+          const responseText = await res.text();
+          let data: any = null;
+          try {
+            data = JSON.parse(responseText);
+          } catch (parseErr) {
+            console.warn(`[CLIENT SCHEDULER] Server returned non-JSON response for ${campaign} (Status ${res.status}):`, responseText.substring(0, 150));
+            data = { error: `Non-JSON server response (Status ${res.status})` };
+          }
+
+          if (res.ok && data && !data.error) {
             console.log(`[CLIENT SCHEDULER] Success triggering ${campaign}:`, data);
             if (onTrigger) onTrigger(campaign, true, data);
           } else {
-            console.error(`[CLIENT SCHEDULER] Error response for ${campaign}:`, data.error);
-            if (onTrigger) onTrigger(campaign, false, data);
+            const errorMsg = data?.error || `Server returned status ${res.status}`;
+            console.error(`[CLIENT SCHEDULER] Error response for ${campaign}:`, errorMsg);
+            if (onTrigger) onTrigger(campaign, false, data || { error: errorMsg });
           }
         } catch (err) {
           console.error(`[CLIENT SCHEDULER] Fetch fail on ${campaign}:`, err);

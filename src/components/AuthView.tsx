@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { Sparkles, Eye, EyeOff, Check, AlertCircle } from "lucide-react";
+import { Sparkles, Eye, EyeOff, Check, AlertCircle, ArrowRight } from "lucide-react";
 import { User } from "../types";
 import { auth } from "../firebase";
+import firebaseConfig from "../../firebase-applet-config.json";
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -75,6 +76,8 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
         friendlyMessage = "No user account found with this email.";
       } else if (err.code === "auth/weak-password") {
         friendlyMessage = "The password provided is too weak. Choose at least 6 characters.";
+      } else if (err.code === "auth/operation-not-allowed") {
+        friendlyMessage = "Email/Password sign-in is not enabled in this Firebase project. Go to the Firebase Console -> Build -> Authentication -> Sign-in method, and enable 'Email/Password' to resolve this. You can also sign in with Google below!";
       }
       setError(friendlyMessage || "Authentication request failed.");
     } finally {
@@ -164,9 +167,49 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
         </div>
 
         {error && (
-          <div className="flex items-center gap-2 p-3 bg-rose-500/10 text-rose-500 border border-rose-500/20 text-xs font-semibold rounded-xl mb-4">
-            <AlertCircle className="h-4.5 w-4.5 text-rose-500 shrink-0" />
-            <span>{error}</span>
+          <div className="p-4 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-xs rounded-xl mb-4 space-y-3">
+            <div className="flex items-start gap-2 font-semibold text-rose-500">
+              <AlertCircle className="h-4.5 w-4.5 text-rose-500 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+            {error.includes("already in use") && (
+              <div className="pt-1.5 border-t border-rose-500/10">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsLogin(true);
+                    setError(null);
+                  }}
+                  className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300 font-bold transition cursor-pointer"
+                >
+                  <span>Switch to the Log In tab</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+            {(error.includes("not enabled") || error.includes("operation-not-allowed")) && (
+              <div className="pt-2.5 border-t border-rose-500/10 text-slate-350 space-y-2 text-[11px] leading-relaxed font-normal">
+                <p className="font-semibold text-slate-200 uppercase tracking-wider text-[10px]">How to resolve this:</p>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>
+                    Open the{" "}
+                    <a
+                      href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/providers`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-indigo-400 hover:underline inline-flex items-center gap-0.5 font-bold"
+                    >
+                      Firebase Console Sign-In Methods
+                    </a>
+                  </li>
+                  <li>Click <strong>Add new provider</strong> (or edit <strong>Email/Password</strong> if already listed).</li>
+                  <li>Enable <strong>Email/Password</strong> and click <strong>Save</strong>.</li>
+                </ol>
+                <div className="pt-1 border-t border-slate-800 text-slate-400">
+                  <p>💡 Quick alternative: Use <strong className="text-slate-300">"Continue with Google"</strong> below (it works out of the box) or <strong className="text-slate-300">"Proceed in Local Sandbox Mode"</strong> to bypass cloud sign-in.</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -269,8 +312,23 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
           <span>Continue with Google</span>
         </button>
 
+        <button
+          onClick={() => {
+            onLoginSuccess({
+              id: "demo-local-user",
+              name: "Demo Guest",
+              email: "demo@lifesync.ai"
+            });
+          }}
+          type="button"
+          className="w-full py-2.5 mt-3 rounded-xl border border-dashed border-indigo-500/30 bg-indigo-500/5 hover:bg-indigo-500/10 text-xs font-bold text-indigo-400 transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+        >
+          <Sparkles className="h-4 w-4 text-indigo-400" />
+          <span>Proceed in Local Sandbox Mode</span>
+        </button>
+
         {isLogin && (
-          <div className="mt-6 text-center">
+          <div className="mt-5 text-center flex flex-col gap-2">
             <button
               onClick={handleDemoAccess}
               className="text-xs font-semibold text-indigo-500 hover:text-indigo-600 transition"

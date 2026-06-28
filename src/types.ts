@@ -105,6 +105,7 @@ export interface EmailDeliveryLog {
   providerUsed: string;
   sentAt: string;
   error?: string;
+  etherealUrl?: string;
 }
 
 export interface InAppNotification {

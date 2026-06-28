@@ -59,6 +59,10 @@ export default function AnalyticsView({
   const [emailLogs, setEmailLogs] = useState<EmailDeliveryLog[]>([]);
   const [logsLoading, setLogsLoading] = useState<boolean>(false);
   
+  const [morningT, setMorningT] = useState<string>("08:00");
+  const [eveningT, setEveningT] = useState<string>("18:00");
+  const [eodT, setEodT] = useState<string>("21:00");
+
   const [provider, setProvider] = useState<"sandbox" | "resend" | "sendgrid" | "smtp" | "gmail">("sandbox");
   const [apiKey, setApiKey] = useState<string>("");
   const [host, setHost] = useState<string>("");
@@ -66,14 +70,10 @@ export default function AnalyticsView({
   const [user, setUser] = useState<string>("");
   const [pass, setPass] = useState<string>("");
   const [from, setFrom] = useState<string>("");
-  
-  const [morningT, setMorningT] = useState<string>("08:00");
-  const [eveningT, setEveningT] = useState<string>("18:00");
-  const [eodT, setEodT] = useState<string>("21:0s");
 
   const [testEmailTo, setTestEmailTo] = useState<string>("");
   const [testSending, setTestSending] = useState<boolean>(false);
-  const [testMessage, setTestMessage] = useState<{ success: boolean; text: string } | null>(null);
+  const [testMessage, setTestMessage] = useState<{ success: boolean; text: string; etherealUrl?: string } | null>(null);
   
   const [saveStatus, setSaveStatus] = useState<{ success: boolean; text: string } | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -186,6 +186,9 @@ export default function AnalyticsView({
   // Synchronize incoming backend settings with React form states
   useEffect(() => {
     if (notifSettings) {
+      setMorningT(notifSettings.morningTime || "08:00");
+      setEveningT(notifSettings.eveningTime || "18:00");
+      setEodT(notifSettings.eodTime || "21:00");
       setProvider(notifSettings.emailProvider || "sandbox");
       setApiKey(notifSettings.emailApiKey || "");
       setHost(notifSettings.smtpHost || "");
@@ -193,9 +196,6 @@ export default function AnalyticsView({
       setUser(notifSettings.smtpUser || "");
       setPass(notifSettings.smtpPass || "");
       setFrom(notifSettings.smtpFrom || "");
-      setMorningT(notifSettings.morningTime || "08:00");
-      setEveningT(notifSettings.eveningTime || "18:00");
-      setEodT(notifSettings.eodTime || "21:00");
     }
   }, [notifSettings]);
 
@@ -211,10 +211,14 @@ export default function AnalyticsView({
         const res = await fetch("/api/emails/delivery-logs", {
           headers: { "x-user-id": uid }
         });
-        if (res.ok) {
-          const data = await res.json();
-          setEmailLogs(data);
+        const text = await res.text();
+        let data = [];
+        try {
+          data = JSON.parse(text);
+        } catch (_) {
+          console.warn("[Analytics] delivery-logs returned non-JSON:", text.substring(0, 100));
         }
+        setEmailLogs(data);
       } catch (err) {
         console.error("Error loading secure email logs via API:", err);
       } finally {
@@ -241,10 +245,14 @@ export default function AnalyticsView({
         const res = await fetch("/api/emails/delivery-logs", {
           headers: { "x-user-id": uid }
         });
-        if (res.ok) {
-          const data = await res.json();
-          setEmailLogs(data);
+        const text = await res.text();
+        let data = [];
+        try {
+          data = JSON.parse(text);
+        } catch (_) {
+          console.warn("[Analytics] delivery-logs fallback returned non-JSON:", text.substring(0, 100));
         }
+        setEmailLogs(data);
       } catch (err) {
         console.error("Error loading secure email logs:", err);
       }
@@ -317,12 +325,25 @@ export default function AnalyticsView({
         },
         body: JSON.stringify(configPayload)
       });
-      const data = await res.json();
-      if (res.ok) {
-        setTestMessage({ success: true, text: `Successfully sent test to ${testEmailTo}! Service logged as success.` });
+      const responseText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseErr) {
+        console.warn(`[Analytics] Server returned non-JSON response for send-test (Status ${res.status}):`, responseText.substring(0, 150));
+        data = { error: `Server returned non-JSON response (Status ${res.status}). The backend might still be starting up.` };
+      }
+
+      if (res.ok && data && !data.error) {
+        setTestMessage({ 
+          success: true, 
+          text: `Successfully sent test to ${testEmailTo}!`, 
+          etherealUrl: data.etherealUrl 
+        });
         fetchEmailLogs();
       } else {
-        setTestMessage({ success: false, text: `Test failed: ${data.error || "Unknown server error"}` });
+        const errorMsg = data?.error || `Server returned status ${res.status}`;
+        setTestMessage({ success: false, text: `Test failed: ${errorMsg}` });
       }
     } catch (err: any) {
       setTestMessage({ success: false, text: `Network error: ${err.message}` });
@@ -429,12 +450,25 @@ export default function AnalyticsView({
           compiledData
         })
       });
-      const data = await res.json();
-      if (res.ok) {
-        setTestMessage({ success: true, text: `Successfully generated and dispatched ${campaign} campaign report!` });
+      const responseText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseErr) {
+        console.warn(`[Analytics] Server returned non-JSON response for ${campaign} (Status ${res.status}):`, responseText.substring(0, 150));
+        data = { error: `Server returned non-JSON response (Status ${res.status}). The backend might still be starting up.` };
+      }
+
+      if (res.ok && data && !data.error) {
+        setTestMessage({ 
+          success: true, 
+          text: `Successfully generated and dispatched ${campaign} campaign report!`,
+          etherealUrl: data.etherealUrl 
+        });
         fetchEmailLogs();
       } else {
-        setTestMessage({ success: false, text: `Failed to dispatch ${campaign}: ${data.error}` });
+        const errorMsg = data?.error || `Server returned status ${res.status}`;
+        setTestMessage({ success: false, text: `Failed to dispatch ${campaign}: ${errorMsg}` });
       }
     } catch (err: any) {
       setTestMessage({ success: false, text: `Manual release fault: ${err.message}` });
@@ -1086,6 +1120,7 @@ export default function AnalyticsView({
 
 
 
+
                 {/* Save Credentials Action */}
                 <div className="flex justify-between items-center pt-1">
                   <span className="text-[10px] text-slate-400 font-medium">Saves updated scheduling and toggle preferences.</span>
@@ -1133,6 +1168,7 @@ export default function AnalyticsView({
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-800">Campaign</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-800">To</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-800">Status</th>
+                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-800">Subject</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-800">Provider</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-800">Timestamp</th>
                       </tr>
@@ -1140,8 +1176,8 @@ export default function AnalyticsView({
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-850">
                       {emailLogs.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="py-12 text-center text-slate-400 font-semibold italic">
-                            No mailing attempts registered. Use sandbox triggers to create audit logs!
+                          <td colSpan={6} className="py-12 text-center text-slate-400 font-semibold italic">
+                            No mailing attempts registered. Use verification triggers to create audit logs!
                           </td>
                         </tr>
                       ) : (
@@ -1168,6 +1204,9 @@ export default function AnalyticsView({
                                   ❌ Failed
                                 </span>
                               )}
+                            </td>
+                            <td className="p-2.5 text-slate-700 dark:text-slate-300 truncate max-w-[150px]" title={log.subject || "No Subject"}>
+                              {log.subject || "No Subject"}
                             </td>
                             <td className="p-2.5 font-mono text-[9px] text-slate-400 capitalize">
                               {log.providerUsed}
@@ -1199,10 +1238,159 @@ export default function AnalyticsView({
           <section className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
             <div>
               <h4 className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
-                Gateway Testing Sandbox
+                Email Configuration & Verification Gateway
               </h4>
-              <p className="text-xs text-slate-400 mt-1">Verify mail gateways, SMTP connectivity keys, and trigger instant campaign releases.</p>
+              <p className="text-xs text-slate-400 mt-1">Select your preferred delivery provider, manage credentials, and send real-world test emails directly to your inbox.</p>
             </div>
+
+            {/* Email Gateway Provider Form */}
+            <div className="p-4 bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-slate-150 dark:border-slate-850 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Select Email Provider</label>
+                  <select 
+                    value={provider}
+                    onChange={(e) => setProvider(e.target.value as any)}
+                    className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-bold text-slate-800 dark:text-slate-100"
+                  >
+                    <option value="sandbox">Sandbox Mode (Virtual Inbox)</option>
+                    <option value="gmail">Google Gmail (App Password)</option>
+                    <option value="smtp">Custom SMTP Server</option>
+                    <option value="resend">Resend API Key</option>
+                    <option value="sendgrid">SendGrid API Key</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Sender Address (From)</label>
+                  <input 
+                    type="text" 
+                    value={from}
+                    onChange={(e) => setFrom(e.target.value)}
+                    placeholder="your-email@domain.com"
+                    className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold text-slate-800 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+
+              {provider === "gmail" && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-indigo-500/5 dark:bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-[10.5px] leading-relaxed text-slate-600 dark:text-indigo-400 animate-fadeIn">
+                    <strong>Gmail Setup:</strong> Enter your Gmail address and a <strong>16-character Google App Password</strong> (Google Account Settings &rarr; Security &rarr; Enable 2-Step Verification &rarr; Search "App passwords").
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Gmail User</label>
+                      <input 
+                        type="text" 
+                        value={user}
+                        onChange={(e) => setUser(e.target.value)}
+                        placeholder="your.gmail@gmail.com"
+                        className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold text-slate-800 dark:text-slate-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">App Password</label>
+                      <input 
+                        type="password" 
+                        value={pass}
+                        onChange={(e) => setPass(e.target.value)}
+                        placeholder="xxxx xxxx xxxx xxxx"
+                        className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold text-slate-800 dark:text-slate-100"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {provider === "smtp" && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">SMTP Hostname</label>
+                      <input 
+                        type="text" 
+                        value={host}
+                        onChange={(e) => setHost(e.target.value)}
+                        placeholder="smtp.example.com"
+                        className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold text-slate-800 dark:text-slate-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">SMTP Port</label>
+                      <input 
+                        type="number" 
+                        value={port}
+                        onChange={(e) => setPort(Number(e.target.value))}
+                        placeholder="587"
+                        className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold text-slate-800 dark:text-slate-100"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">SMTP User</label>
+                      <input 
+                        type="text" 
+                        value={user}
+                        onChange={(e) => setUser(e.target.value)}
+                        placeholder="user@example.com"
+                        className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold text-slate-800 dark:text-slate-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">SMTP Password</label>
+                      <input 
+                        type="password" 
+                        value={pass}
+                        onChange={(e) => setPass(e.target.value)}
+                        placeholder="password"
+                        className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold text-slate-800 dark:text-slate-100"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(provider === "resend" || provider === "sendgrid") && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10.5px] leading-relaxed text-slate-600 dark:text-amber-450 animate-fadeIn">
+                    <strong>API Key:</strong> Enter your secret key. Ensure you have verified the "Sender Address" in your provider panel.
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">{provider === "resend" ? "Resend" : "SendGrid"} API Secret Key</label>
+                    <input 
+                      type="password" 
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder={provider === "resend" ? "re_123456789..." : "SG.123456789..."}
+                      className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold text-slate-800 dark:text-slate-100"
+                    />
+                  </div>
+                </div>
+              )}
+              
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={handleSaveEmailConfig}
+                  disabled={isSaving}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-300 text-white font-black text-[11px] rounded-xl shadow-md transition cursor-pointer flex items-center gap-1"
+                >
+                  {isSaving ? (
+                    <>
+                      <RefreshCw className="h-3 w-3 animate-spin" /> Saving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckSquare className="h-3 w-3" /> Save Gateway Credentials
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 dark:border-slate-850 pt-4"></div>
 
             {/* Verification Form */}
             <form onSubmit={handleSendTestEmail} className="space-y-3">
@@ -1231,8 +1419,8 @@ export default function AnalyticsView({
               </div>
 
               {testMessage && (
-                <div className={`p-3 rounded-xl text-xs font-medium border ${testMessage.success ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-600" : "bg-rose-500/15 border-rose-500/30 text-rose-600"}`}>
-                  {testMessage.text}
+                <div className={`p-3 rounded-xl text-xs font-medium border ${testMessage.success ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-600" : "bg-rose-500/15 border-rose-500/30 text-rose-600"} space-y-2`}>
+                  <p>{testMessage.text}</p>
                 </div>
               )}
             </form>

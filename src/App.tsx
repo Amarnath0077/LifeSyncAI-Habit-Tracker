@@ -101,8 +101,13 @@ export default function App() {
           console.error("Error ensuring user profile document exists:", e);
         }
       } else {
-        setCurrentUser(null);
-        localStorage.removeItem("planner_user");
+        setCurrentUser(prev => {
+          if (prev && prev.id === "demo-local-user") {
+            return prev;
+          }
+          localStorage.removeItem("planner_user");
+          return null;
+        });
       }
       setAuthInitializing(false);
     });
@@ -111,7 +116,7 @@ export default function App() {
 
   // Sync session and fetch challenges / logs
   useEffect(() => {
-    if (currentUser && auth.currentUser && auth.currentUser.uid === currentUser.id) {
+    if (currentUser && (currentUser.id === "demo-local-user" || (auth.currentUser && auth.currentUser.uid === currentUser.id))) {
       fetchData();
     } else if (!currentUser) {
       setChallenges([]);
@@ -127,7 +132,7 @@ export default function App() {
 
   // Hook up client-side background email scheduler on login once fully authenticated
   useEffect(() => {
-    if (currentUser?.id && auth.currentUser && auth.currentUser.uid === currentUser.id) {
+    if (currentUser?.id && (currentUser.id === "demo-local-user" || (auth.currentUser && auth.currentUser.uid === currentUser.id))) {
       const cleanup = initializeEmailSchedulers(currentUser.id, (campaign, success, data) => {
         console.log(`[App Scheduler] Background check triggered campaign: ${campaign}. Success: ${success}`, data);
       });
@@ -143,6 +148,42 @@ export default function App() {
     try {
       const uid = currentUser.id;
       
+      if (uid === "demo-local-user") {
+        const challengesData = JSON.parse(localStorage.getItem(`local_challenges_${uid}`) || "[]");
+        const logsData = JSON.parse(localStorage.getItem(`local_tasks_${uid}`) || "[]");
+        const notesData = JSON.parse(localStorage.getItem(`local_notes_${uid}`) || "[]");
+        const goalsData = JSON.parse(localStorage.getItem(`local_goals_${uid}`) || "[]");
+        const achievementsData = JSON.parse(localStorage.getItem(`local_achievements_${uid}`) || "[]");
+        const notificationsData = JSON.parse(localStorage.getItem(`local_notifications_${uid}`) || "[]");
+        const settingsData = JSON.parse(localStorage.getItem(`local_settings_${uid}`) || "null") || {
+          userId: uid,
+          morningEnabled: true,
+          eveningEnabled: true,
+          eodEnabled: true,
+          emailEnabled: false,
+          pushEnabled: false,
+          inAppEnabled: true,
+          emailProvider: "sandbox",
+          morningTime: "08:00",
+          eveningTime: "18:05",
+          eodTime: "22:00",
+          weeklyReportDay: 0,
+          monthlyReportDay: "first"
+        };
+        const reportsData = JSON.parse(localStorage.getItem(`local_analytics_${uid}`) || "[]");
+
+        setChallenges(challengesData);
+        setLogs(logsData);
+        setNotes(notesData);
+        setGoals(goalsData);
+        setAchievements(achievementsData);
+        setNotifications(notificationsData);
+        setNotifSettings(settingsData);
+        setReports(reportsData);
+        setLoading(false);
+        return;
+      }
+
       const [
         challengesSnap, logsSnap, notesSnap, goalsSnap, achievementsSnap, notifsSnap, settingsSnap, reportsSnap
       ] = await Promise.all([
@@ -180,10 +221,10 @@ export default function App() {
           morningEnabled: true,
           eveningEnabled: true,
           eodEnabled: true,
-          emailEnabled: false,
+          emailEnabled: true,
           pushEnabled: false,
           inAppEnabled: true,
-          emailProvider: "sandbox",
+          emailProvider: "resend",
           morningTime: "08:00",
           eveningTime: "18:05",
           eodTime: "22:00",
@@ -221,20 +262,28 @@ export default function App() {
   }) => {
     if (!currentUser) return;
     setError(null);
+    const uid = currentUser.id;
     try {
-      const challengeRef = doc(collection(db, "users", currentUser.id, "challenges"));
+      const challengeId = uid === "demo-local-user" ? `challenge_${Date.now()}` : doc(collection(db, "users", uid, "challenges")).id;
       const newChallenge: Challenge = {
-        id: challengeRef.id,
-        userId: currentUser.id,
+        id: challengeId,
+        userId: uid,
         name: challengeData.name,
         startDate: challengeData.startDate,
         durationDays: challengeData.durationDays,
         dailyTasks: challengeData.dailyTasks,
         createdAt: new Date().toISOString()
       };
-      await setDoc(challengeRef, newChallenge)
-        .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${currentUser.id}/challenges/${challengeRef.id}`));
-      setChallenges((prev) => [...prev, newChallenge]);
+      if (uid === "demo-local-user") {
+        const updated = [...challenges, newChallenge];
+        setChallenges(updated);
+        localStorage.setItem(`local_challenges_${uid}`, JSON.stringify(updated));
+      } else {
+        const challengeRef = doc(db, "users", uid, "challenges", challengeId);
+        await setDoc(challengeRef, newChallenge)
+          .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${uid}/challenges/${challengeId}`));
+        setChallenges((prev) => [...prev, newChallenge]);
+      }
     } catch (err: any) {
       setError(err.message || "Could not register new challenge.");
       throw err;
@@ -310,9 +359,10 @@ export default function App() {
     status: "Completed" | "Skipped" | "Partial" | "Uncompleted"
   ) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
       const existingLog = logs.find(l => 
-        l.userId === currentUser.id && 
+        l.userId === uid && 
         l.challengeId === challengeId && 
         l.date === date && 
         l.taskTitle === taskTitle
@@ -323,30 +373,40 @@ export default function App() {
 
       if (existingLog) {
         if (status === "Uncompleted") {
-          await deleteDoc(doc(db, "users", currentUser.id, "tasks", existingLog.id))
-            .catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${currentUser.id}/tasks/${existingLog.id}`));
+          if (uid !== "demo-local-user") {
+            await deleteDoc(doc(db, "users", uid, "tasks", existingLog.id))
+              .catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${uid}/tasks/${existingLog.id}`));
+          }
           updatedLogsList = logs.filter(l => l.id !== existingLog.id);
           setLogs(updatedLogsList);
         } else {
-          await updateDoc(doc(db, "users", currentUser.id, "tasks", existingLog.id), { status })
-            .catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${currentUser.id}/tasks/${existingLog.id}`));
+          if (uid !== "demo-local-user") {
+            await updateDoc(doc(db, "users", uid, "tasks", existingLog.id), { status })
+              .catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${uid}/tasks/${existingLog.id}`));
+          }
           updatedLogsList = logs.map(l => l.id === existingLog.id ? { ...l, status } : l);
           setLogs(updatedLogsList);
         }
       } else if (status !== "Uncompleted") {
-        const logRef = doc(collection(db, "users", currentUser.id, "tasks"));
+        const logId = uid === "demo-local-user" ? `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}` : doc(collection(db, "users", uid, "tasks")).id;
         const newLog: ChallengeDailyLog = {
-          id: logRef.id,
+          id: logId,
           challengeId,
-          userId: currentUser.id,
+          userId: uid,
           date,
           taskTitle,
           status
         };
-        await setDoc(logRef, newLog)
-          .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${currentUser.id}/tasks/${logRef.id}`));
+        if (uid !== "demo-local-user") {
+          await setDoc(doc(db, "users", uid, "tasks", logId), newLog)
+            .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${uid}/tasks/${logId}`));
+        }
         updatedLogsList = [...logs, newLog];
         setLogs(updatedLogsList);
+      }
+
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_tasks_${uid}`, JSON.stringify(updatedLogsList));
       }
 
       // Check Real-Time Notification & Gamification triggers
@@ -404,7 +464,7 @@ export default function App() {
 
           for (const m of milestones) {
             if (prevPct < m && newPct >= m) {
-              handleSimulateNotif({
+               handleSimulateNotif({
                 type: "system",
                 title: `🏆 ${m}% Milestone Cricked!`,
                 message: `Tremendous effort! You've crossed ${m}% completion on your contract: "${challengeName}"!`
@@ -430,18 +490,28 @@ export default function App() {
   // Delete challenge
   const handleDeleteChallenge = async (challengeId: string) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
-      await deleteDoc(doc(db, "users", currentUser.id, "challenges", challengeId))
-        .catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${currentUser.id}/challenges/${challengeId}`));
+      if (uid !== "demo-local-user") {
+        await deleteDoc(doc(db, "users", uid, "challenges", challengeId))
+          .catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${uid}/challenges/${challengeId}`));
 
-      const assocLogs = logs.filter(l => l.challengeId === challengeId);
-      await Promise.all(
-        assocLogs.map(l => deleteDoc(doc(db, "users", currentUser.id, "tasks", l.id))
-          .catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${currentUser.id}/tasks/${l.id}`)))
-      );
+        const assocLogs = logs.filter(l => l.challengeId === challengeId);
+        await Promise.all(
+          assocLogs.map(l => deleteDoc(doc(db, "users", uid, "tasks", l.id))
+            .catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${uid}/tasks/${l.id}`)))
+        );
+      }
 
-      setChallenges((prev) => prev.filter((c) => c.id !== challengeId));
-      setLogs((prev) => prev.filter((l) => l.challengeId !== challengeId));
+      const updatedChallenges = challenges.filter((c) => c.id !== challengeId);
+      const updatedLogs = logs.filter((l) => l.challengeId !== challengeId);
+      setChallenges(updatedChallenges);
+      setLogs(updatedLogs);
+
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_challenges_${uid}`, JSON.stringify(updatedChallenges));
+        localStorage.setItem(`local_tasks_${uid}`, JSON.stringify(updatedLogs));
+      }
     } catch (err: any) {
       setError(err.message || "Failed to delete challenge.");
     }
@@ -450,28 +520,37 @@ export default function App() {
   // Save daily note
   const handleSaveNote = async (challengeId: string | undefined, date: string, content: string) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
       const existingNote = notes.find(n => 
-        n.userId === currentUser.id && 
+        n.userId === uid && 
         n.date === date && 
         n.challengeId === challengeId
       );
 
+      let updatedNotes = [...notes];
+
       if (existingNote) {
         if (!content.trim()) {
-          await deleteDoc(doc(db, "users", currentUser.id, "notes", existingNote.id))
-            .catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${currentUser.id}/notes/${existingNote.id}`));
-          setNotes(prev => prev.filter(n => n.id !== existingNote.id));
+          if (uid !== "demo-local-user") {
+            await deleteDoc(doc(db, "users", uid, "notes", existingNote.id))
+              .catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${uid}/notes/${existingNote.id}`));
+          }
+          updatedNotes = notes.filter(n => n.id !== existingNote.id);
+          setNotes(updatedNotes);
         } else {
-          await updateDoc(doc(db, "users", currentUser.id, "notes", existingNote.id), { content })
-            .catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${currentUser.id}/notes/${existingNote.id}`));
-          setNotes(prev => prev.map(n => n.id === existingNote.id ? { ...n, content } : n));
+          if (uid !== "demo-local-user") {
+            await updateDoc(doc(db, "users", uid, "notes", existingNote.id), { content })
+              .catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${uid}/notes/${existingNote.id}`));
+          }
+          updatedNotes = notes.map(n => n.id === existingNote.id ? { ...n, content } : n);
+          setNotes(updatedNotes);
         }
       } else if (content.trim()) {
-        const noteRef = doc(collection(db, "users", currentUser.id, "notes"));
+        const noteId = uid === "demo-local-user" ? `note_${Date.now()}` : doc(collection(db, "users", uid, "notes")).id;
         const newNote: UserNote = {
-          id: noteRef.id,
-          userId: currentUser.id,
+          id: noteId,
+          userId: uid,
           date,
           content,
           createdAt: new Date().toISOString()
@@ -479,9 +558,16 @@ export default function App() {
         if (challengeId) {
           newNote.challengeId = challengeId;
         }
-        await setDoc(noteRef, newNote)
-          .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${currentUser.id}/notes/${noteRef.id}`));
-        setNotes(prev => [...prev, newNote]);
+        if (uid !== "demo-local-user") {
+          await setDoc(doc(db, "users", uid, "notes", noteId), newNote)
+            .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${uid}/notes/${noteId}`));
+        }
+        updatedNotes = [...notes, newNote];
+        setNotes(updatedNotes);
+      }
+
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_notes_${uid}`, JSON.stringify(updatedNotes));
       }
     } catch (e) {
       console.error("Error saving note to database", e);
@@ -491,11 +577,12 @@ export default function App() {
   // Create Goal
   const handleCreateGoal = async (title: string, targetDate: string, challengeId?: string) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
-      const goalRef = doc(collection(db, "users", currentUser.id, "goals"));
+      const goalId = uid === "demo-local-user" ? `goal_${Date.now()}` : doc(collection(db, "users", uid, "goals")).id;
       const newGoal: UserGoal = {
-        id: goalRef.id,
-        userId: currentUser.id,
+        id: goalId,
+        userId: uid,
         title,
         targetDate,
         completed: false,
@@ -504,10 +591,16 @@ export default function App() {
       if (challengeId) {
         newGoal.challengeId = challengeId;
       }
-      await setDoc(goalRef, newGoal)
-        .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${currentUser.id}/goals/${goalRef.id}`));
+      if (uid !== "demo-local-user") {
+        await setDoc(doc(db, "users", uid, "goals", goalId), newGoal)
+          .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${uid}/goals/${goalId}`));
+      }
       
-      setGoals((prev) => [...prev, newGoal]);
+      const updatedGoals = [...goals, newGoal];
+      setGoals(updatedGoals);
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_goals_${uid}`, JSON.stringify(updatedGoals));
+      }
       handleUnlockAchievement("Goal Creator", "Registered a custom goal target!");
     } catch (e) {
       console.error("Error creating goal", e);
@@ -517,14 +610,21 @@ export default function App() {
   // Toggle Goal Completed
   const handleToggleGoal = async (id: string, completed: boolean) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
       const completedAt = completed ? new Date().toISOString() : undefined;
-      await updateDoc(doc(db, "users", currentUser.id, "goals", id), { 
-        completed,
-        ...(completedAt ? { completedAt } : {})
-      }).catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${currentUser.id}/goals/${id}`));
+      if (uid !== "demo-local-user") {
+        await updateDoc(doc(db, "users", uid, "goals", id), { 
+          completed,
+          ...(completedAt ? { completedAt } : {})
+        }).catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${uid}/goals/${id}`));
+      }
 
-      setGoals((prev) => prev.map((g) => g.id === id ? { ...g, completed, completedAt } : g));
+      const updatedGoals = goals.map((g) => g.id === id ? { ...g, completed, completedAt } : g);
+      setGoals(updatedGoals);
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_goals_${uid}`, JSON.stringify(updatedGoals));
+      }
       if (completed) {
         handleUnlockAchievement("Milestone Conquered", "Marked a custom high-priority milestone goal in the database!");
       }
@@ -536,10 +636,17 @@ export default function App() {
   // Delete Goal
   const handleDeleteGoal = async (id: string) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
-      await deleteDoc(doc(db, "users", currentUser.id, "goals", id))
-        .catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${currentUser.id}/goals/${id}`));
-      setGoals((prev) => prev.filter((g) => g.id !== id));
+      if (uid !== "demo-local-user") {
+        await deleteDoc(doc(db, "users", uid, "goals", id))
+          .catch(e => handleFirestoreError(e, OperationType.DELETE, `users/${uid}/goals/${id}`));
+      }
+      const updatedGoals = goals.filter((g) => g.id !== id);
+      setGoals(updatedGoals);
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_goals_${uid}`, JSON.stringify(updatedGoals));
+      }
     } catch (e) {
       console.error("Error deleting goal", e);
     }
@@ -548,22 +655,29 @@ export default function App() {
   // Unlock Achievement
   const handleUnlockAchievement = async (title: string, description: string) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
       const hasAch = achievements.some(a => a.title === title);
       if (hasAch) return;
 
-      const achRef = doc(collection(db, "users", currentUser.id, "achievements"));
+      const achId = uid === "demo-local-user" ? `ach_${Date.now()}` : doc(collection(db, "users", uid, "achievements")).id;
       const newAch: Achievement = {
-        id: achRef.id,
-        userId: currentUser.id,
+        id: achId,
+        userId: uid,
         title,
         description,
         unlockedAt: new Date().toISOString()
       };
-      await setDoc(achRef, newAch)
-        .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${currentUser.id}/achievements/${achRef.id}`));
+      if (uid !== "demo-local-user") {
+        await setDoc(doc(db, "users", uid, "achievements", achId), newAch)
+          .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${uid}/achievements/${achId}`));
+      }
 
-      setAchievements((prev) => [...prev, newAch]);
+      const updatedAchievements = [...achievements, newAch];
+      setAchievements(updatedAchievements);
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_achievements_${uid}`, JSON.stringify(updatedAchievements));
+      }
       handleSimulateNotif({
         type: "system",
         title: `🏆 Medal Awarded: ${title}`,
@@ -581,15 +695,21 @@ export default function App() {
   // Update Notification settings
   const handleUpdateNotifSettings = async (settings: Partial<NotificationSetting>) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
       const mergedSettings = {
         ...notifSettings,
         ...settings,
-        userId: currentUser.id
+        userId: uid
       };
-      await setDoc(doc(db, "users", currentUser.id, "notification_preferences", "settings"), mergedSettings)
-        .catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${currentUser.id}/notification_preferences/settings`));
+      if (uid !== "demo-local-user") {
+        await setDoc(doc(db, "users", uid, "notification_preferences", "settings"), mergedSettings)
+          .catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${uid}/notification_preferences/settings`));
+      }
       setNotifSettings(mergedSettings as NotificationSetting);
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_settings_${uid}`, JSON.stringify(mergedSettings));
+      }
     } catch (e) {
       console.error("Error saving notification settings", e);
     }
@@ -598,18 +718,30 @@ export default function App() {
   // Mark all or single notification as read
   const handleMarkNotifsRead = async (id?: string, all?: boolean) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
+      let updatedNotifs = [...notifications];
       if (all) {
         const unreadNotifs = notifications.filter(n => !n.read);
-        await Promise.all(
-          unreadNotifs.map(n => updateDoc(doc(db, "users", currentUser.id, "notifications", n.id), { read: true })
-            .catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${currentUser.id}/notifications/${n.id}`)))
-        );
-        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+        if (uid !== "demo-local-user") {
+          await Promise.all(
+            unreadNotifs.map(n => updateDoc(doc(db, "users", uid, "notifications", n.id), { read: true })
+              .catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${uid}/notifications/${n.id}`)))
+          );
+        }
+        updatedNotifs = notifications.map(n => ({ ...n, read: true }));
+        setNotifications(updatedNotifs);
       } else if (id) {
-        await updateDoc(doc(db, "users", currentUser.id, "notifications", id), { read: true })
-          .catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${currentUser.id}/notifications/${id}`));
-        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+        if (uid !== "demo-local-user") {
+          await updateDoc(doc(db, "users", uid, "notifications", id), { read: true })
+            .catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${uid}/notifications/${id}`));
+        }
+        updatedNotifs = notifications.map(n => n.id === id ? { ...n, read: true } : n);
+        setNotifications(updatedNotifs);
+      }
+
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_notifications_${uid}`, JSON.stringify(updatedNotifs));
       }
     } catch (e) {
       console.error("Status update error", e);
@@ -619,11 +751,12 @@ export default function App() {
   // Simulate Trigger Daily Notification
   const handleSimulateNotif = async (params: { type: "morning" | "evening" | "eod" | "system", title: string, message: string }) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
-      const notifRef = doc(collection(db, "users", currentUser.id, "notifications"));
+      const notifId = uid === "demo-local-user" ? `notif_${Date.now()}` : doc(collection(db, "users", uid, "notifications")).id;
       const newNotif: InAppNotification = {
-        id: notifRef.id,
-        userId: currentUser.id,
+        id: notifId,
+        userId: uid,
         type: params.type,
         title: params.title,
         message: params.message,
@@ -631,9 +764,15 @@ export default function App() {
         read: false,
         createdAt: new Date().toISOString()
       };
-      await setDoc(notifRef, newNotif)
-        .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${currentUser.id}/notifications/${notifRef.id}`));
-      setNotifications(prev => [newNotif, ...prev]);
+      if (uid !== "demo-local-user") {
+        await setDoc(doc(db, "users", uid, "notifications", notifId), newNotif)
+          .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${uid}/notifications/${notifId}`));
+      }
+      const updatedNotifs = [newNotif, ...notifications];
+      setNotifications(updatedNotifs);
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_notifications_${uid}`, JSON.stringify(updatedNotifs));
+      }
     } catch (e) {
       console.error("Error triggering simulation", e);
     }
@@ -642,11 +781,12 @@ export default function App() {
   // Save progress report permanently
   const handleSaveReport = async (report: Omit<ProgressReport, "id" | "userId" | "createdAt" | "score"> & { score?: number }) => {
     if (!currentUser) return;
+    const uid = currentUser.id;
     try {
-      const reportRef = doc(collection(db, "users", currentUser.id, "analytics"));
+      const reportId = uid === "demo-local-user" ? `report_${Date.now()}` : doc(collection(db, "users", uid, "analytics")).id;
       const newReport: ProgressReport = {
-        id: reportRef.id,
-        userId: currentUser.id,
+        id: reportId,
+        userId: uid,
         type: report.type,
         periodStr: report.periodStr,
         dateKey: report.dateKey,
@@ -659,9 +799,15 @@ export default function App() {
         suggestionsOrForecast: report.suggestionsOrForecast || "",
         createdAt: new Date().toISOString()
       };
-      await setDoc(reportRef, newReport)
-        .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${currentUser.id}/analytics/${reportRef.id}`));
-      setReports((prev) => [newReport, ...prev]);
+      if (uid !== "demo-local-user") {
+        await setDoc(doc(db, "users", uid, "analytics", reportId), newReport)
+          .catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${uid}/analytics/${reportId}`));
+      }
+      const updatedReports = [newReport, ...reports];
+      setReports(updatedReports);
+      if (uid === "demo-local-user") {
+        localStorage.setItem(`local_analytics_${uid}`, JSON.stringify(updatedReports));
+      }
       handleUnlockAchievement(
         report.type === "weekly" ? "Weekly Scribe" : "Monthly Architect", 
         `Auto-logged persistent ${report.type} performance statistics to the database!`
