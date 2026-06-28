@@ -100,13 +100,22 @@ async function authenticateBackendScheduler() {
     console.log("Backend custom scheduler successfully authenticated as " + systemSchedulerEmail);
     isSchedulerAuthenticated = true;
   } catch (err: any) {
-    if (err.code === "auth/user-not-found" || err.message?.includes("user-not-found") || err.code === "auth/invalid-credential" || err.code === "auth/operation-not-allowed") {
+    if (err.code === "auth/operation-not-allowed" || err.message?.includes("operation-not-allowed")) {
+      console.warn("[SCHEDULER] Email/Password authentication is not enabled in Firebase Auth. Backend custom scheduler will fall back gracefully.");
+      isSchedulerAuthenticated = false;
+      return;
+    }
+    if (err.code === "auth/user-not-found" || err.message?.includes("user-not-found") || err.code === "auth/invalid-credential") {
       try {
         await createUserWithEmailAndPassword(authInstance, systemSchedulerEmail, systemSchedulerPassword);
         console.log("System scheduler backend account created & authenticated successfully.");
         isSchedulerAuthenticated = true;
       } catch (createErr: any) {
-        console.error("Failed to register system-scheduler credential profile:", createErr.message || createErr);
+        if (createErr.code === "auth/operation-not-allowed") {
+          console.warn("[SCHEDULER] Email/Password authentication is not enabled in Firebase Auth. Registration skipped.");
+        } else {
+          console.error("Failed to register system-scheduler credential profile:", createErr.message || createErr);
+        }
         isSchedulerAuthenticated = false;
       }
     } else {
@@ -923,6 +932,190 @@ Output your response as a valid JSON array of strings containing exactly 3 items
   }
 });
 
+// Fetch or generate Daily Affirmation from Gemini API
+app.post("/api/planner/affirmation", async (req, res) => {
+  const userId = req.headers["x-user-id"] as string;
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized access" });
+  }
+
+  const { date } = req.body;
+  if (!date) {
+    return res.status(400).json({ error: "Date is required" });
+  }
+
+  const localAffirmations = [
+    {
+      quote: "Small, daily improvements over time lead to stunning results. Trust the process.",
+      author: "Robin Sharma"
+    },
+    {
+      quote: "You do not rise to the level of your goals. You fall to the level of your systems.",
+      author: "James Clear"
+    },
+    {
+      quote: "The secret of your future is hidden in your daily routine.",
+      author: "Mike Murdock"
+    },
+    {
+      quote: "It is not that we have a short time to live, but that we waste a lot of it.",
+      author: "Seneca"
+    },
+    {
+      quote: "Consistency is the playground of the dull. It is also the vehicle of the elite.",
+      author: "Inspirational"
+    },
+    {
+      quote: "The only limit to our realization of tomorrow is our doubts of today.",
+      author: "Franklin D. Roosevelt"
+    },
+    {
+      quote: "Do not wish for an easy life. Wish for the strength to endure a difficult one.",
+      author: "Bruce Lee"
+    },
+    {
+      quote: "Action is the foundational key to all success.",
+      author: "Pablo Picasso"
+    },
+    {
+      quote: "You miss 100% of the shots you don't take.",
+      author: "Wayne Gretzky"
+    },
+    {
+      quote: "An obstacle is often a stepping stone.",
+      author: "William Prescott"
+    }
+  ];
+
+  const getLocalAffirmation = (dateStr: string) => {
+    let hash = 0;
+    for (let i = 0; i < dateStr.length; i++) {
+      hash = dateStr.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const idx = Math.abs(hash) % localAffirmations.length;
+    return localAffirmations[idx];
+  };
+
+  try {
+    const affirmationRef = firestoreDb
+      .collection("users")
+      .doc(userId)
+      .collection("affirmations")
+      .doc(date);
+    
+    const docSnap = await affirmationRef.get();
+    if (docSnap.exists) {
+      return res.json({
+        success: true,
+        source: docSnap.data().source || "Stored",
+        affirmation: docSnap.data()
+      });
+    }
+
+    const ai = getAI();
+    let generatedQuote = "";
+    let generatedAuthor = "";
+    let source = "Local Engine";
+
+    if (ai) {
+      const prompt = `You are an incredibly positive, encouraging, and empathetic daily coach. 
+Please generate a unique, uplifting, positive daily affirmation or encouraging quote for today (${date}) that helps the user stay focused, disciplined, and motivated on their personal growth challenges.
+Return the response as a single valid JSON object containing exactly two keys: "quote" and "author". 
+Make the "quote" deeply encouraging, short, and punchy (1-2 sentences). 
+If the quote is original, attribute the "author" to "Inspirational Coach" or "Gemini AI". Otherwise, attribute it to its real author.
+
+Example response format:
+{
+  "quote": "Small, consistent actions every day compound into extraordinary results.",
+  "author": "James Clear"
+}`;
+
+      try {
+        let response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+
+        const text = response.text || "";
+        const parsed = JSON.parse(text);
+        if (parsed && parsed.quote) {
+          generatedQuote = parsed.quote;
+          generatedAuthor = parsed.author || "Unknown";
+          source = "Gemini AI";
+        }
+      } catch (primaryErr: any) {
+        console.warn("Primary model gemini-3.5-flash failed for affirmation, trying fallback gemini-3.1-flash-lite...", primaryErr.message || primaryErr);
+        try {
+          let response = await ai.models.generateContent({
+            model: "gemini-3.1-flash-lite",
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json"
+            }
+          });
+
+          const text = response.text || "";
+          const parsed = JSON.parse(text);
+          if (parsed && parsed.quote) {
+            generatedQuote = parsed.quote;
+            generatedAuthor = parsed.author || "Unknown";
+            source = "Gemini AI";
+          }
+        } catch (secondaryErr: any) {
+          console.warn("Fallback model failed too, falling back to local engine:", secondaryErr.message || secondaryErr);
+        }
+      }
+    }
+
+    if (!generatedQuote) {
+      const fallback = getLocalAffirmation(date);
+      generatedQuote = fallback.quote;
+      generatedAuthor = fallback.author;
+      source = "Local Engine";
+    }
+
+    const newAffirmation = {
+      id: date,
+      userId,
+      date,
+      text: generatedQuote,
+      author: generatedAuthor,
+      source,
+      systemToken: "SysSchedulerPass123!",
+      createdAt: new Date().toISOString()
+    };
+
+    await affirmationRef.set(newAffirmation);
+
+    return res.json({
+      success: true,
+      source,
+      affirmation: newAffirmation
+    });
+
+  } catch (error: any) {
+    console.error("Error in /api/planner/affirmation:", error);
+    const fallback = getLocalAffirmation(date);
+    return res.json({
+      success: true,
+      source: "Local Engine Fallback",
+      affirmation: {
+        id: date,
+        userId,
+        date,
+        text: fallback.quote,
+        author: fallback.author,
+        source: "Local Engine Fallback",
+        systemToken: "SysSchedulerPass123!",
+        createdAt: new Date().toISOString()
+      }
+    });
+  }
+});
+
 
 // ==========================================
 // EMAIL NOTIFICATION SYSTEM & AUTOMATED JOBS
@@ -1555,7 +1748,7 @@ function buildCampaignEmailContent(type: string, name: string, data: any) {
 // Perform actual network dispatch
 async function executeEmailTransmission(log: any, settings: any, pdfAttachmentBuffer?: Buffer): Promise<{ success: boolean; error?: string }> {
   try {
-    const provider = settings.emailProvider || "sandbox";
+    const provider = settings.emailProvider || settings.provider || "sandbox";
 
     if (provider === "sandbox") {
       console.log(`[SANDBOX SMTP] Dispatching email to ${log.to} | Subject: ${log.subject}`);
@@ -1592,7 +1785,7 @@ async function executeEmailTransmission(log: any, settings: any, pdfAttachmentBu
     }
 
     if (provider === "resend") {
-      const apiKey = settings.emailApiKey || process.env.RESEND_API_KEY;
+      const apiKey = settings.emailApiKey || settings.apiKey || process.env.RESEND_API_KEY;
       if (!apiKey) {
         return { success: false, error: "Resend API Key is missing. Please configure settings or supply RESEND_API_KEY env." };
       }
@@ -1628,7 +1821,7 @@ async function executeEmailTransmission(log: any, settings: any, pdfAttachmentBu
     }
 
     if (provider === "sendgrid") {
-      const apiKey = settings.emailApiKey || process.env.SENDGRID_API_KEY;
+      const apiKey = settings.emailApiKey || settings.apiKey || process.env.SENDGRID_API_KEY;
       if (!apiKey) {
         return { success: false, error: "SendGrid API Key is missing. Please supply in settings." };
       }
@@ -1734,7 +1927,7 @@ async function realEmailDispatch(
       settings = { emailProvider: "sandbox", emailEnabled: true };
     }
 
-    const provider = settings.emailProvider || "sandbox";
+    const provider = settings.emailProvider || settings.provider || "sandbox";
     let status: "success" | "failed" = "failed";
     let errorMsg = "";
 
@@ -1779,7 +1972,8 @@ async function realEmailDispatch(
       providerUsed: provider,
       sentAt: sentTimeField,
       sentTime: sentTimeField,
-      error: errorMsg
+      error: errorMsg,
+      systemToken: "SysSchedulerPass123!"
     };
 
     try {
@@ -1802,7 +1996,8 @@ async function realEmailDispatch(
         : `Encountered error: ${errorMsg}. Queued for retry.`,
       date: todayStr,
       read: false,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      systemToken: "SysSchedulerPass123!"
     };
 
     try {
@@ -2003,12 +2198,17 @@ app.post("/api/emails/send-test", async (req, res) => {
   const settings = req.body;
 
   try {
-    const userDocRef = firestoreDb.collection("users").doc(userId);
-    const userDoc = await userDocRef.get();
-    if (!userDoc.exists) {
-      return res.status(404).json({ error: "User profile document not found in Firestore." });
+    let user = { name: "LifeSync User", email: settings.recipient || "test@example.com" };
+    try {
+      const userDocRef = firestoreDb.collection("users").doc(userId);
+      const userDoc = await userDocRef.get();
+      if (userDoc.exists) {
+        user = userDoc.data();
+      }
+    } catch (dbErr: any) {
+      console.warn("[SERVER] Non-fatal: Unable to retrieve user profile document from Firestore:", dbErr.message || dbErr);
     }
-    const user = userDoc.data();
+
     const userEmail = settings.recipient || user.email || "test@example.com";
 
     const subject = "Test Email Connection - LifeSync AI";
@@ -2016,7 +2216,7 @@ app.post("/api/emails/send-test", async (req, res) => {
       <div style="font-family: Arial, sans-serif; padding: 25px; border: 1px solid #e2e8f0; border-radius: 8px; max-width: 500px; margin: auto;">
         <h3 style="color: #4f46e5; margin: 0 0 15px 0;">Connection Confirmed! 🚀</h3>
         <p style="font-size: 14px; line-height: 1.5; color: #334155;">Hello, ${user.name || "User"}!</p>
-        <p style="font-size: 13px; line-height: 1.5; color: #475569;">If you are reading this message, your custom <strong>${(settings.emailProvider || "sandbox").toUpperCase()}</strong> credentials are configured correctly and we can dispatch automated habit checklists safely.</p>
+        <p style="font-size: 13px; line-height: 1.5; color: #475569;">If you are reading this message, your custom <strong>${(settings.emailProvider || settings.provider || "sandbox").toUpperCase()}</strong> credentials are configured correctly and we can dispatch automated habit checklists safely.</p>
         <hr style="border: 0; border-top: 1px solid #f1f5f9; margin: 15px 0;" />
         <span style="font-size: 11px; color: #94a3b8; display: block; text-align: center;">LifeSync Automated Cron Services • Active</span>
       </div>
@@ -2040,17 +2240,22 @@ app.post("/api/emails/send-test", async (req, res) => {
       status: status,
       deliveryStatus: status,
       retryCount: 0,
-      providerUsed: settings.emailProvider || "sandbox",
+      providerUsed: settings.emailProvider || settings.provider || "sandbox",
       sentAt: sentTimeField,
       sentTime: sentTimeField,
-      error: errorMsg
+      error: errorMsg,
+      systemToken: "SysSchedulerPass123!"
     };
 
-    const logRef = firestoreDb.collection("users").doc(userId).collection("email_logs").doc(logId);
-    await logRef.set(logPayload);
+    try {
+      const logRef = firestoreDb.collection("users").doc(userId).collection("email_logs").doc(logId);
+      await logRef.set(logPayload);
+    } catch (dbErr: any) {
+      console.warn("[SERVER] Non-fatal: Unable to write test email log to Firestore on backend:", dbErr.message || dbErr);
+    }
 
     if (txResult.success) {
-      res.json({ success: true, message: `Test email sent successfully to ${userEmail}!` });
+      res.json({ success: true, message: `Test email sent successfully to ${userEmail}!`, logPayload });
     } else {
       res.status(500).json({ success: false, error: txResult.error || "Failed to dispatch test email." });
     }
@@ -2066,17 +2271,27 @@ app.post("/api/emails/retry/:logId", async (req, res) => {
   const logId = req.params.logId;
 
   try {
+    let logDoc;
     const logDocRef = firestoreDb.collection("users").doc(userId).collection("email_logs").doc(logId);
-    const logDoc = await logDocRef.get();
+    try {
+      logDoc = await logDocRef.get();
+    } catch (dbErr: any) {
+      return res.status(403).json({ error: `Access Denied: Unable to fetch email log from Firestore. (${dbErr.message || dbErr})` });
+    }
+
     if (!logDoc.exists) {
       return res.status(404).json({ error: "Email log not found." });
     }
     const log = logDoc.data();
 
-    const settingsDoc = await firestoreDb.collection("users").doc(userId).collection("notification_preferences").doc("settings").get();
-    let settings = settingsDoc.exists ? settingsDoc.data() : null;
-    if (!settings) {
-      settings = { emailProvider: "sandbox", emailEnabled: true };
+    let settings = { emailProvider: "sandbox", emailEnabled: true };
+    try {
+      const settingsDoc = await firestoreDb.collection("users").doc(userId).collection("notification_preferences").doc("settings").get();
+      if (settingsDoc.exists) {
+        settings = settingsDoc.data();
+      }
+    } catch (dbErr) {
+      console.warn("[SERVER] Non-fatal: Unable to retrieve settings from Firestore on retry:", dbErr);
     }
 
     let pdfBuffer: Buffer | undefined;
@@ -2092,18 +2307,28 @@ app.post("/api/emails/retry/:logId", async (req, res) => {
     const updatedStatus = txResult.success ? "success" : "failed";
     const errorMsg = txResult.error || "";
 
-    await logDocRef.update({
-      status: updatedStatus,
-      deliveryStatus: updatedStatus,
-      retryCount: (log.retryCount || 0) + 1,
-      sentAt: new Date().toISOString(),
-      sentTime: new Date().toISOString(),
-      error: errorMsg
-    });
+    try {
+      await logDocRef.update({
+        status: updatedStatus,
+        deliveryStatus: updatedStatus,
+        retryCount: (log.retryCount || 0) + 1,
+        sentAt: new Date().toISOString(),
+        sentTime: new Date().toISOString(),
+        error: errorMsg,
+        systemToken: "SysSchedulerPass123!"
+      });
+    } catch (dbErr: any) {
+      console.warn("[SERVER] Non-fatal: Unable to update email log status in Firestore on backend:", dbErr.message || dbErr);
+    }
 
-    const logsSnap = await firestoreDb.collection("users").doc(userId).collection("email_logs").get();
-    const logs = logsSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
-    logs.sort((a: any, b: any) => new Date(b.sentTime || 0).getTime() - new Date(a.sentTime || 0).getTime());
+    let logs: any[] = [];
+    try {
+      const logsSnap = await firestoreDb.collection("users").doc(userId).collection("email_logs").get();
+      logs = logsSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+      logs.sort((a: any, b: any) => new Date(b.sentTime || 0).getTime() - new Date(a.sentTime || 0).getTime());
+    } catch (dbErr) {
+      console.warn("[SERVER] Non-fatal: Unable to list email logs on retry:", dbErr);
+    }
 
     res.json({
       success: txResult.success,

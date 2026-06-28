@@ -203,6 +203,26 @@ export default function AnalyticsView({
   const fetchEmailLogs = async () => {
     setLogsLoading(true);
     const uid = auth.currentUser?.uid || currentUser.id;
+    
+    // Avoid unauthenticated direct Firestore read and go straight to secure API fallback
+    if (!auth.currentUser) {
+      console.log("[CLIENT] No authenticated Firebase user yet; bypassing direct Firestore read to use secure API proxy");
+      try {
+        const res = await fetch("/api/emails/delivery-logs", {
+          headers: { "x-user-id": uid }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setEmailLogs(data);
+        }
+      } catch (err) {
+        console.error("Error loading secure email logs via API:", err);
+      } finally {
+        setLogsLoading(false);
+      }
+      return;
+    }
+
     try {
       const colRef = collection(db, "users", uid, "email_logs");
       const snap = await getDocs(colRef);
@@ -238,74 +258,188 @@ export default function AnalyticsView({
   }, []);
 
   // Save the full Email & Schedule setup to backend database
-const handleSendTestEmail = async (e: React.FormEvent) => {
-  e.preventDefault();
-
-  if (!testEmailTo) {
-    setTestMessage({
-      success: false,
-      text: "Please enter a recipient email address."
-    });
-    return;
-  }
-
-  setTestSending(true);
-  setTestMessage(null);
-
-  try {
-    const res = await fetch("/api/emails/send-test", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-user-id": currentUser.id
-      },
-      body: JSON.stringify({
-        recipient: testEmailTo,
-        emailProvider: "gmail"
-      })
-    });
-
-    const data = await res.json();
-
-    setTestMessage({
-      success: data.success,
-      text: data.message || data.error
-    });
-
-    fetchEmailLogs?.();
-
-  } catch (err: any) {
-    setTestMessage({
-      success: false,
-      text: err.message
-    });
-  } finally {
-    setTestSending(false);
-  }
-};
-  // Safe manual campaign trigger handler
-const handleTriggerEmailCampaign = async (
-  campaign: "morning" | "evening" | "eod" | "weekly" | "monthly"
-) => {
-  try {
-    setTestMessage({
-      success: true,
-      text: `${campaign.toUpperCase()} campaign triggered successfully`
-    });
-
-    if (typeof fetchEmailLogs === "function") {
-      fetchEmailLogs();
+  const handleSaveEmailConfig = async () => {
+    setIsSaving(true);
+    setSaveStatus(null);
+    try {
+      await onUpdateNotifSettings({
+        emailProvider: provider,
+        emailApiKey: apiKey,
+        smtpHost: host,
+        smtpPort: Number(port),
+        smtpUser: user,
+        smtpPass: pass,
+        smtpFrom: from,
+        morningTime: morningT,
+        eveningTime: eveningT,
+        eodTime: eodT
+      });
+      setSaveStatus({ success: true, text: "Notification preferences and schedule saved successfully!" });
+      setTimeout(() => setSaveStatus(null), 4000);
+    } catch (err: any) {
+      setSaveStatus({ success: false, text: "Failed to persist preferences: " + err.message });
+    } finally {
+      setIsSaving(false);
     }
-  } catch (err: any) {
-    setTestMessage({
-      success: false,
-      text: err?.message || "Failed to trigger campaign"
-    });
-  }
-};
-        
-        // Write generated logs & notifications client-side with full user credentials context
-     
+  };
+
+  // Perform safe connection testing
+  const handleSendTestEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testEmailTo) {
+      setTestMessage({ success: false, text: "Please enter a recipient email address." });
+      return;
+    }
+    setTestSending(true);
+    setTestMessage(null);
+    try {
+      const userId = currentUser.id;
+      
+      const configPayload = {
+        userId,
+        recipient: testEmailTo,
+        provider,
+        emailProvider: provider,
+        apiKey,
+        emailApiKey: apiKey,
+        smtpHost: host,
+        smtpPort: Number(port),
+        smtpUser: user,
+        smtpPass: pass,
+        smtpFrom: from
+      };
+
+      const res = await fetch("/api/emails/send-test", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-user-id": userId
+        },
+        body: JSON.stringify(configPayload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTestMessage({ success: true, text: `Successfully sent test to ${testEmailTo}! Service logged as success.` });
+        fetchEmailLogs();
+      } else {
+        setTestMessage({ success: false, text: `Test failed: ${data.error || "Unknown server error"}` });
+      }
+    } catch (err: any) {
+      setTestMessage({ success: false, text: `Network error: ${err.message}` });
+    } finally {
+      setTestSending(false);
+    }
+  };
+
+  // Safe manual campaign trigger handler
+  const handleTriggerEmailCampaign = async (campaign: "morning" | "evening" | "eod" | "weekly" | "monthly") => {
+    try {
+      const userId = currentUser.id;
+      const userMail = currentUser.email || "";
+      const userName = currentUser.name || "User";
+
+      // Compile current client status statistics
+      const todayStr = new Date().toISOString().split("T")[0];
+      const getStreak = (c: Challenge) => {
+        const challengeLogs = logs.filter((l) => l.challengeId === c.id);
+        if (challengeLogs.length === 0) return 0;
+        const hasSuccess = (d: string) => {
+          const logsForDay = challengeLogs.filter((l) => l.date === d);
+          if (logsForDay.length === 0) return false;
+          return logsForDay.every((l) => l.status === "Completed") || logsForDay.some((l) => l.status === "Completed" || l.status === "Partial");
+        };
+
+        let streak = 0;
+        const checkDate = new Date();
+        for (let i = 0; i < 180; i++) {
+          const dStr = checkDate.toISOString().split("T")[0];
+          if (hasSuccess(dStr)) {
+            streak++;
+            checkDate.setDate(checkDate.getDate() - 1);
+          } else {
+            if (i === 0) {
+              checkDate.setDate(checkDate.getDate() - 1);
+              const yStr = checkDate.toISOString().split("T")[0];
+              if (hasSuccess(yStr)) {
+                streak++;
+                checkDate.setDate(checkDate.getDate() - 1);
+                continue;
+              }
+            }
+            break;
+          }
+        }
+        return streak;
+      };
+
+      const currentStreak = challenges.length > 0
+        ? Math.max(...challenges.map((c) => getStreak(c)), 0)
+        : 0;
+
+      const todayTasksList: Array<{ challengeName: string; taskTitle: string; status: string }> = [];
+      challenges.forEach((c) => {
+        (c.dailyTasks || []).forEach((task) => {
+          const log = logs.find((l) => l.challengeId === c.id && l.date === todayStr && l.taskTitle === task);
+          todayTasksList.push({
+            challengeName: c.name,
+            taskTitle: task,
+            status: log ? log.status : "Uncompleted"
+          });
+        });
+      });
+
+      const completedCount = todayTasksList.filter((t) => t.status === "Completed").length;
+      const partialCount = todayTasksList.filter((t) => t.status === "Partial").length;
+      const totalCount = todayTasksList.length;
+      const completionRate = totalCount > 0 ? Math.round(((completedCount + 0.5 * partialCount) / totalCount) * 100) : 0;
+
+      const compiledData = {
+        name: userName,
+        email: userMail,
+        streak: currentStreak,
+        totalCount,
+        completedCount,
+        partialCount,
+        completionRate,
+        todayTasks: todayTasksList,
+        challenges: challenges.map((c) => {
+          const sDate = new Date(c.startDate);
+          const curDate = new Date(todayStr);
+          const elapsed = Math.max(1, Math.ceil((curDate.getTime() - sDate.getTime()) / (24*60*60*1000)));
+          return {
+            name: c.name,
+            progressDay: elapsed,
+            durationDays: c.durationDays
+          };
+        })
+      };
+
+      const res = await fetch("/api/emails/trigger-campaign", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-user-id": userId
+        },
+        body: JSON.stringify({ 
+          userId, 
+          campaign,
+          userName,
+          userEmail: userMail,
+          clientSettings: notifSettings || { emailProvider: "sandbox", emailEnabled: true },
+          compiledData
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTestMessage({ success: true, text: `Successfully generated and dispatched ${campaign} campaign report!` });
+        fetchEmailLogs();
+      } else {
+        setTestMessage({ success: false, text: `Failed to dispatch ${campaign}: ${data.error}` });
+      }
+    } catch (err: any) {
+      setTestMessage({ success: false, text: `Manual release fault: ${err.message}` });
+    }
+  };
 
   useEffect(() => {
     fetchCoachInsights();
@@ -955,16 +1089,21 @@ const handleTriggerEmailCampaign = async (
                 {/* Save Credentials Action */}
                 <div className="flex justify-between items-center pt-1">
                   <span className="text-[10px] text-slate-400 font-medium">Saves updated scheduling and toggle preferences.</span>
-             <button
-  onClick={() =>
-    setTestMessage({
-      success: true,
-      text: "Settings saved successfully"
-    })
-  }
->
-  Save Automation Preferences
-</button>
+                  <button
+                    onClick={handleSaveEmailConfig}
+                    disabled={isSaving}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-300 text-white font-black text-xs rounded-xl shadow-lg transition shadow-indigo-600/10 cursor-pointer flex items-center gap-1.5"
+                  >
+                    {isSaving ? (
+                      <>
+                        <RefreshCw className="h-3 w-3 animate-spin" /> Saving...
+                      </>
+                    ) : (
+                      <>
+                        <CheckSquare className="h-4 w-4" /> Save Automation Preferences
+                      </>
+                    )}
+                  </button>
                 </div>
 
                 {saveStatus && (

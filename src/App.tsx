@@ -125,15 +125,15 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // Hook up client-side background email scheduler on login
+  // Hook up client-side background email scheduler on login once fully authenticated
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && auth.currentUser && auth.currentUser.uid === currentUser.id) {
       const cleanup = initializeEmailSchedulers(currentUser.id, (campaign, success, data) => {
         console.log(`[App Scheduler] Background check triggered campaign: ${campaign}. Success: ${success}`, data);
       });
       return () => cleanup();
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, auth.currentUser]);
 
   // Bulk data loader
   const fetchData = async () => {
@@ -821,6 +821,7 @@ export default function App() {
         {/* View switching logic */}
         {activeTab === "planner" ? (
           <PlannerView 
+            currentUser={currentUser}
             challenges={challenges}
             logs={logs}
             activeDate={activeDate}

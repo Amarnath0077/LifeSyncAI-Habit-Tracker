@@ -1,11 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Plus, Trash2, Calendar, Check, AlertCircle, X, ChevronLeft, ChevronRight, 
   Flame, CalendarDays, Percent, Clock, Sparkles, Smile, ListChecks, HelpCircle
 } from "lucide-react";
-import { Challenge, ChallengeDailyLog, UserNote, UserGoal } from "../types";
+import { Challenge, ChallengeDailyLog, UserNote, UserGoal, User } from "../types";
 
 interface PlannerViewProps {
+  currentUser: User | null;
   challenges: Challenge[];
   logs: ChallengeDailyLog[];
   activeDate: string; // YYYY-MM-DD
@@ -32,6 +33,7 @@ interface PlannerViewProps {
 }
 
 export default function PlannerView({
+  currentUser,
   challenges,
   logs,
   activeDate,
@@ -46,6 +48,63 @@ export default function PlannerView({
   onToggleGoal,
   onDeleteGoal
 }: PlannerViewProps) {
+  // Affirmation state
+  const [affirmation, setAffirmation] = useState<{ text: string; author: string; source: string } | null>(null);
+  const [loadingAffirmation, setLoadingAffirmation] = useState(false);
+  const [affirmationError, setAffirmationError] = useState<string | null>(null);
+
+  // Fetch Daily Affirmation
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    
+    let isMounted = true;
+    const fetchAffirmation = async () => {
+      setLoadingAffirmation(true);
+      setAffirmationError(null);
+      try {
+        const response = await fetch("/api/planner/affirmation", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": currentUser.id
+          },
+          body: JSON.stringify({ date: activeDate })
+        });
+        
+        if (!response.ok) {
+          throw new Error("Failed to load daily quote");
+        }
+        
+        const data = await response.json();
+        if (isMounted) {
+          if (data && data.success && data.affirmation) {
+            setAffirmation({
+              text: data.affirmation.text,
+              author: data.affirmation.author || "Inspirational Coach",
+              source: data.source
+            });
+          } else {
+            throw new Error("Invalid response format");
+          }
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          setAffirmationError(err.message || "Failed to load affirmation");
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingAffirmation(false);
+        }
+      }
+    };
+    
+    fetchAffirmation();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [activeDate, currentUser?.id]);
+
   // Navigation & Drawer
   const [isAddingChallenge, setIsAddingChallenge] = useState(false);
   const [newChallengeName, setNewChallengeName] = useState("");
@@ -257,6 +316,63 @@ export default function PlannerView({
             onChange={(e) => e.target.value && setActiveDate(e.target.value)}
             className="p-1.5 rounded-xl border border-slate-201 dark:border-slate-800 text-xs font-bold bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
+        </div>
+      </div>
+
+      {/* Daily Affirmation Section */}
+      <div className="rounded-2xl p-6 bg-gradient-to-r from-indigo-50/80 via-white to-purple-50/80 dark:from-slate-900/60 dark:via-slate-900 dark:to-indigo-950/40 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden" id="daily-affirmation-card">
+        {/* Abstract background decorative lights */}
+        <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-400/10 dark:bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-0 w-36 h-36 bg-purple-400/10 dark:bg-purple-500/5 rounded-full blur-2xl pointer-events-none" />
+        
+        <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-start gap-4 flex-1">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 text-white shadow-md shadow-indigo-500/15">
+              <Sparkles className="h-5 w-5 animate-pulse" />
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-md border border-indigo-100 dark:border-indigo-900/30">
+                  Morning Affirmation
+                </span>
+                {affirmation && (
+                  <span className="text-[9px] text-slate-400 font-medium font-mono">
+                    Source: {affirmation.source}
+                  </span>
+                )}
+              </div>
+              
+              {loadingAffirmation ? (
+                <div className="space-y-2 py-1">
+                  <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-72 sm:w-96" />
+                  <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-36" />
+                </div>
+              ) : affirmationError ? (
+                <div className="flex items-center gap-1.5 text-rose-500 text-xs font-semibold py-1">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>Could not fetch today's affirmation. Showing local quote.</span>
+                </div>
+              ) : affirmation ? (
+                <div className="space-y-1">
+                  <p className="text-base font-medium tracking-tight text-slate-800 dark:text-slate-100 italic">
+                    "{affirmation.text}"
+                  </p>
+                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                    — {affirmation.author}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 py-1">No affirmation loaded yet.</p>
+              )}
+            </div>
+          </div>
+          
+          <div className="shrink-0 flex items-center">
+            <div className="text-right hidden md:block">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Mindset Sync</p>
+              <p className="text-xs font-black text-indigo-500 mt-0.5">100% Focused</p>
+            </div>
+          </div>
         </div>
       </div>
 

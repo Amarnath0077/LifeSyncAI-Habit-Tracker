@@ -38,8 +38,11 @@ export function initializeEmailSchedulers(
   };
 
   const checkAndTrigger = async () => {
-    // Audit-compliant: strictly use auth.currentUser.uid instead of transient offline inputs
-    const activeUid = auth.currentUser?.uid || userId;
+    if (!auth.currentUser) {
+      console.log("[CLIENT SCHEDULER] Firebase Auth not fully initialized or user logged out; skipping tick.");
+      return;
+    }
+    const activeUid = auth.currentUser.uid;
     try {
       const settingsRef = doc(db, "users", activeUid, "notification_preferences", "settings");
       let settingsSnap;
@@ -229,29 +232,6 @@ export function initializeEmailSchedulers(
           const data = await res.json();
           if (res.ok) {
             console.log(`[CLIENT SCHEDULER] Success triggering ${campaign}:`, data);
-            
-            // Client-side saves the log and notifications safely
-            if (data.logPayload) {
-              try {
-                await setDoc(doc(db, "users", activeUid, "email_logs", data.logPayload.id), data.logPayload);
-              } catch (logErr) {
-                try {
-                  handleFirestoreError(logErr, OperationType.CREATE, `users/${activeUid}/email_logs/${data.logPayload.id}`);
-                } catch (ignored) {}
-                console.error("[CLIENT SCHEDULER] Failed to write log payload to Firestore:", logErr);
-              }
-            }
-            if (data.notifPayload) {
-              try {
-                await setDoc(doc(db, "users", activeUid, "notifications", data.notifPayload.id), data.notifPayload);
-              } catch (notifErr) {
-                try {
-                  handleFirestoreError(notifErr, OperationType.CREATE, `users/${activeUid}/notifications/${data.notifPayload.id}`);
-                } catch (ignored) {}
-                console.error("[CLIENT SCHEDULER] Failed to write notification payload to Firestore:", notifErr);
-              }
-            }
-
             if (onTrigger) onTrigger(campaign, true, data);
           } else {
             console.error(`[CLIENT SCHEDULER] Error response for ${campaign}:`, data.error);

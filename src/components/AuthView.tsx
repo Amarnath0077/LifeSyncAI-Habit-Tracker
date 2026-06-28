@@ -32,9 +32,10 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
 
     try {
       if (isLogin) {
-        // Firebase Sign In
+        console.log("[EMAIL_AUTH] Starting Email/Password login", { email });
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         const fbUser = userCredential.user;
+        console.log("[EMAIL_AUTH] Login successful for UID:", fbUser.uid);
         
         setSuccess("Login successful! Welcome back.");
         setTimeout(() => {
@@ -45,12 +46,14 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
           });
         }, 800);
       } else {
-        // Firebase Sign Up
+        console.log("[EMAIL_AUTH] Starting Email/Password registration", { email, name });
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const fbUser = userCredential.user;
+        console.log("[EMAIL_AUTH] Registration successful for UID:", fbUser.uid);
         
         // Update profile displayName
         await updateProfile(fbUser, { displayName: name || "User" });
+        console.log("[EMAIL_AUTH] User display profile name updated successfully to:", name || "User");
         
         setSuccess("Account registered successfully! Logging you in...");
         setTimeout(() => {
@@ -62,6 +65,7 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
         }, 1200);
       }
     } catch (err: any) {
+      console.error("[EMAIL_AUTH_ERROR] Authentication action failed:", err.code || "unknown-code", err.message);
       let friendlyMessage = err.message;
       if (err.code === "auth/email-already-in-use") {
         friendlyMessage = "This email is already in use by another account.";
@@ -84,9 +88,12 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
     setLoading(true);
 
     try {
+      console.log("[GOOGLE_AUTH] Starting Google login");
       const provider = new GoogleAuthProvider();
+      console.log("[GOOGLE_AUTH] Popup launched");
       const result = await signInWithPopup(auth, provider);
       const fbUser = result.user;
+      console.log("[GOOGLE_AUTH] Google login successful for UID:", fbUser.uid);
 
       setSuccess(`Signed in successfully with Google as ${fbUser.displayName || fbUser.email}!`);
       setTimeout(() => {
@@ -97,7 +104,7 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
         });
       }, 1000);
     } catch (err: any) {
-      console.error("Google Sign-In Error", err);
+      console.error("[GOOGLE_AUTH_ERROR]", err.code || "unknown-code", err.message);
       setError(err.message || "Google Sign-In failed or was cancelled.");
     } finally {
       setLoading(false);
