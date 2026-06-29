@@ -21,7 +21,7 @@ export const auth = getAuth(app);
 console.log("[FIREBASE_INITIALIZATION] Firebase Auth instance loaded.");
 
 // Initialize Firestore Database with custom databaseId if configured
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app);
 console.log("[FIREBASE_INITIALIZATION] Firestore Database instance loaded. Custom DB ID used:", firebaseConfig.firestoreDatabaseId || "default");
 
 // Initialize Firebase Analytics safely (will not throw errors in iframes)
