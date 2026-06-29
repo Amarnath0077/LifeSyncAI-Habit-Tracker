@@ -1,10 +1,9 @@
 {
-  "projectId": "intricate-coda-1sjh2",
-  "appId": "1:1038549241541:web:9d2d8464b1052c5700aaac",
-  "apiKey": "AIzaSyDj2J6XU7ETgHCiuyo8BpxQzXzZtwKFvoY",
-  "authDomain": "intricate-coda-1sjh2.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-2799e93b-c542-4ea0-8da6-abfea71c473a",
-  "storageBucket": "intricate-coda-1sjh2.firebasestorage.app",
-  "messagingSenderId": "1038549241541",
-  "measurementId": ""
+  "projectId": "lifesyncai-f9630",
+  "appId": "1:1095392109549:web:c84124e94a7729d299bde4",
+  "apiKey": "AIzaSyCaqqnhf8VIW9WTNk6B2rVmAbpch1er398",
+  "authDomain": "lifesyncai-f9630.firebaseapp.com",
+  "storageBucket": "lifesyncai-f9630.firebasestorage.app",
+  "messagingSenderId": "1095392109549",
+  "measurementId": "G-F0JQM430FF"
 }
